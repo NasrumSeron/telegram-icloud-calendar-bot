@@ -1,0 +1,6 @@
+python-telegram-bot==21.10
+google-genai>=0.3.0
+pydantic>=2.6
+caldav>=3.0        # we call calendar.add_event(<raw ical text>); older 1.x named it save_event
+icalendar>=5.0.13
+python-dotenv>=1.0.1

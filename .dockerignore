@@ -1,0 +1,14 @@
+# Keep secrets and local junk out of the image (COPY . . would otherwise bake .env in)
+.env
+.env.*
+!.env.example
+.git
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/
+logs/
+*.log
+*.db
+*.sqlite*

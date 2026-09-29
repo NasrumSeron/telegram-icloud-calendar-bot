@@ -1,0 +1,46 @@
+# Two containers from ONE image, sharing only the .env file:
+#
+#   calendar-bot  -> the standalone Telegram bot (bot.py).
+#   calendar-api  -> the HTTP adapter Butler calls (service.py).
+#
+# They are separate processes on purpose. bot.py runs python-telegram-bot's
+# async event loop; bolting a web server into it means one can break the other.
+# Two processes cost almost nothing and cannot take each other down. If the
+# adapter crashes, your Telegram bot keeps working, and vice versa.
+#
+# BEFORE FIRST RUN, create the shared network once:
+#
+#   docker network create --opt com.docker.network.driver.mtu=1460 bots-shared
+#
+# The MTU is not optional. Docker's default (1500) was too large for the real
+# path to the internet here and made large HTTPS requests (a real Gemini call)
+# silently hang while small ones succeeded. 1460 fixed it. The shared network
+# must carry the same setting or that bug comes back.
+
+services:
+
+  calendar-bot:
+    build: .
+    container_name: telegram-calendar-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - bots-shared
+
+  calendar-api:
+    build: .
+    container_name: calendar-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    # 0.0.0.0 so Butler's container can reach it. Still no `ports:` section,
+    # so nothing is published to your home network — only containers on
+    # bots-shared can see it.
+    command: ["python", "service.py", "8080", "0.0.0.0"]
+    networks:
+      - bots-shared
+
+networks:
+  bots-shared:
+    external: true
