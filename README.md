@@ -76,13 +76,13 @@ stateDiagram-v2
 | Suite | Type | Checks | Needs |
 |---|---|---|---|
 | `tests/test_ical_offline.py` | iCalendar output: alarms, all-day dates, UTC times | 19 | nothing |
-| `tests/test_flow_offline.py` | Whole Telegram conversation with Telegram, Gemini and iCloud mocked. Confirm blocking, button effects, corrections keep choices, exactly one write, allowlist | 53 | nothing |
-| `tests/test_service_offline.py` | HTTP adapter: draft → amend → confirm, expiry, draft ownership per user, error paths | 75 | nothing |
+| `tests/test_flow_offline.py` | Whole Telegram conversation with Telegram, Gemini and iCloud mocked. Confirm blocking, button effects, corrections keep choices, exactly one write, allowlist (fails closed when empty) | 62 | nothing |
+| `tests/test_service_offline.py` | HTTP adapter: draft → amend → confirm, expiry, draft ownership per user, error paths, input limits | 95 | nothing |
 | `tests/live/test_gemini_parsing.py` | 10-phrase gold standard against the real model. Expected dates are computed from today's date | 10 phrases | Gemini key |
 | `tests/live/test_alarms.py`, `test_caldav_write.py` | Real writes to iCloud, checked by eye on an iPhone | manual | iCloud |
 | `tests/live/test_network.py`, `test_minimal_gemini.py` | Diagnostics for network/API hangs | — | network |
 
-The offline suites (**147 checks**) run with no keys and no network:
+The offline suites (**176 checks**) run with no keys and no network:
 
 ```bash
 pip install -r requirements.txt
