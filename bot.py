@@ -207,7 +207,8 @@ async def show_card(
 
 
 def is_allowed(user_id: int) -> bool:
-    return not ALLOWED_USER_IDS or user_id in ALLOWED_USER_IDS
+    # Fails closed: an empty allowlist allows nobody (main() refuses to start anyway).
+    return user_id in ALLOWED_USER_IDS
 
 
 # ---------------------------------------------------------------- messages
@@ -218,13 +219,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
 
-    if not ALLOWED_USER_IDS:
-        await update.message.reply_text(
-            "Security notice: this bot isn't locked to specific users yet.\n"
-            f"Your Telegram user ID is {user_id}. Set TELEGRAM_ALLOWED_USER_ID={user_id} "
-            'in .env (comma-separate more people, e.g. "111,222") and restart. Continuing for now.'
-        )
-    elif not is_allowed(user_id):
+    if not is_allowed(user_id):
         logger.warning("Rejected message from unauthorized user_id=%s", user_id)
         await update.message.reply_text("This bot is private.")
         return
@@ -421,14 +416,18 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def main() -> None:
+    if not ALLOWED_USER_IDS:
+        raise SystemExit(
+            "TELEGRAM_ALLOWED_USER_ID is empty, so this bot refuses to start (it would be open "
+            "to anyone). Find your numeric Telegram user ID (e.g. message @userinfobot), put it "
+            'in .env as TELEGRAM_ALLOWED_USER_ID=<id> (comma-separate more people, e.g. '
+            '"111,222"), then start the bot again.'
+        )
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("calendars", cmd_calendars))
     app.add_handler(CommandHandler(["help", "start"], cmd_help))
     app.add_handler(CallbackQueryHandler(handle_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    if not ALLOWED_USER_IDS:
-        logger.warning("TELEGRAM_ALLOWED_USER_ID is not set -- anyone can currently use this bot!")
 
     logger.info("Bot starting (long polling)...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

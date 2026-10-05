@@ -99,7 +99,7 @@ Live tests are skipped unless you opt in: `RUN_LIVE_TESTS=1 python tests/live/te
 ## Run it (Docker)
 
 ```bash
-cp .env.example .env        # fill in: Telegram token, Gemini key, Apple ID + app-specific password, allowed user IDs
+cp .env.example .env        # fill in: Telegram token, Gemini key, Apple ID + app-specific password, allowed user IDs (required: the bot won't start without it)
 docker network create --opt com.docker.network.driver.mtu=1460 bots-shared   # once
 docker compose up -d --build
 docker compose logs -f calendar-bot
@@ -115,7 +115,7 @@ docker compose logs -f calendar-bot
 - **One event per message.** Multi-event messages were deferred.
 - **Drafts live in memory.** A restart loses any unconfirmed draft. Confirmed events are unaffected.
 - **Timezone is hard-coded** to Asia/Singapore in the prompt and date handling.
-- **Allowlist fails open when empty.** If `TELEGRAM_ALLOWED_USER_ID` is blank, anyone can use the bot. It warns in the log and in chat so you can find your ID on first run. Set it.
+- **Allowlist fails closed.** If `TELEGRAM_ALLOWED_USER_ID` is blank, the bot refuses to start and exits with a one-line message. Set your numeric Telegram user ID in `.env` **before the first start** (comma-separate more people).
 - **The HTTP adapter has no authentication.** It trusts the `user_id` it is sent and relies on being reachable only on a private Docker network (no published ports). Don't expose port 8080.
 - **One iCloud account.** All allowed users write through the same Apple ID, choosing between that account's calendars.
 - **LLM output is checked for shape, not truth.** The schema guarantees valid fields, not the right date. The review card is the safeguard.

@@ -263,11 +263,39 @@ async def scenario_security():
     check("stranger's button press writes nothing", write.call_count == 0)
 
 
+async def scenario_allowlist_fail_closed():
+    print("\n10. An empty allowlist refuses everyone, and the bot will not start")
+    with patch.object(bot, "ALLOWED_USER_IDS", set()):
+        check("empty allowlist allows nobody", bot.is_allowed(111) is False)
+        check("... not even user id 0", bot.is_allowed(0) is False)
+        with patch.object(bot, "Application") as app_cls:
+            exited = None
+            try:
+                bot.main()
+            except SystemExit as e:
+                exited = e
+        check("main() exits when the allowlist is empty", exited is not None)
+        check("exit message says how to fix it",
+              exited is not None and "TELEGRAM_ALLOWED_USER_ID" in str(exited.code))
+        check("Telegram application never built", app_cls.builder.call_count == 0)
+
+        bot.DRAFTS.clear()
+        ctx = make_context()
+        upd = make_message_update(111, 111, "lunch tomorrow 1pm")
+        with patch.object(bot, "parse_event_text") as parse:
+            await bot.handle_message(upd, ctx)
+        check("message refused as private", "private" in str(upd.message.reply_text.await_args))
+        check("Gemini never called", parse.call_count == 0)
+        check("no draft created", 111 not in bot.DRAFTS)
+    check("allowlist restored after the test", bot.is_allowed(111) is True)
+
+
 async def main():
     await scenario_timed_event()
     await scenario_missing_location()
     await scenario_all_day()
     await scenario_security()
+    await scenario_allowlist_fail_closed()
 
     print("\n" + "=" * 70)
     if failures:

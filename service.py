@@ -66,6 +66,18 @@ log = logging.getLogger("calendar-api")
 SERVICE_NAME = "calendar"
 SERVICE_VERSION = "2.0-butler"
 
+# Input limits (Gate G #14). 4096 = Telegram's message length limit.
+MAX_BODY = 16_384
+MAX_TEXT = 4096
+MAX_NAME = 64
+_DRAIN_LIMIT = 65_536       # unread body we swallow so the caller still sees our reply
+BAD_REQUEST = "Bad request."
+INTERNAL_ERROR = "Calendar hit an internal error."
+
+
+class BadRequest(Exception):
+    """Malformed input. The detail never reaches the caller."""
+
 # EDIT ME: how long an unconfirmed draft survives before it is forgotten.
 DRAFT_TTL_SECONDS = 900
 
@@ -524,32 +536,63 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, CAPABILITIES)
         return self._json(404, {"ok": False, "error": "no such endpoint"})
 
+    def _body(self) -> dict:
+        """Parse the JSON object body, or raise BadRequest (never returns a non-dict)."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise BadRequest()
+        if length < 0:
+            raise BadRequest()
+        if length > MAX_BODY:
+            if length <= _DRAIN_LIMIT:
+                self.rfile.read(length)
+            raise BadRequest()
+        if not length:
+            return {}
+        try:
+            body = json.loads(self.rfile.read(length))
+        except (ValueError, RecursionError):      # JSONDecodeError + bad UTF-8
+            raise BadRequest()
+        if not isinstance(body, dict):
+            raise BadRequest()
+        return body
+
     def do_POST(self):  # noqa: N802
         if self.path != "/invoke":
             return self._json(404, {"ok": False, "error": "no such endpoint"})
 
-        length = int(self.headers.get("Content-Length") or 0)
+        action = ""
         try:
-            body = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
-            return self._json(200, {"ok": False, "error": "invalid JSON in request"})
+            body = self._body()
+            action = str(body.get("action") or "")
+            if len(action) > MAX_NAME:
+                raise BadRequest()
+            handler = ACTIONS.get(action)
+            if handler is None:
+                return self._json(200, {"ok": False, "error": f"unknown action '{action}'"})
 
-        action = str(body.get("action") or "")
-        handler = ACTIONS.get(action)
-        if handler is None:
-            return self._json(200, {"ok": False, "error": f"unknown action '{action}'"})
+            params = body.get("params")
+            if params is None:
+                params = {}
+            if not isinstance(params, dict):
+                raise BadRequest()
+            try:
+                user_id = int(body.get("user_id") or 0)
+            except (TypeError, ValueError, OverflowError):
+                raise BadRequest()
+            original = str(body.get("original_message") or "")
+            if len(original) > MAX_TEXT or any(
+                    isinstance(v, str) and len(v) > MAX_TEXT for v in params.values()):
+                raise BadRequest()
 
-        try:
-            result = handler(
-                body.get("params") or {},
-                int(body.get("user_id") or 0),
-                str(body.get("original_message") or ""),
-            )
-        except Exception as exc:  # noqa: BLE001
+            result = handler(params, user_id, original)
+        except BadRequest:
+            return self._json(200, {"ok": False, "error": BAD_REQUEST})
+        except Exception:  # noqa: BLE001
             # Never let a traceback reach Telegram, but always log it in full.
             log.exception("action %s failed", action)
-            return self._json(200, {"ok": False,
-                                    "error": f"{type(exc).__name__}: {exc}"})
+            return self._json(200, {"ok": False, "error": INTERNAL_ERROR})
 
         return self._json(200, result)
 

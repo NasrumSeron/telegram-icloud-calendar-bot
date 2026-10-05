@@ -359,6 +359,86 @@ def test_all_day_switch_uses_all_day_alert_choices():
           str(labels_main))
 
 
+def test_http_input_validation():
+    import http.client
+    import json as _json
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    print("\n17. /invoke rejects bad input with a short fixed reply (Gate G #14, C2/C3)")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    BAD = {"ok": False, "error": "Bad request."}
+
+    def raw(content_length, payload=b""):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            conn.putrequest("POST", "/invoke")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", content_length)
+            conn.endheaders()
+            if payload:
+                conn.send(payload)
+            r = conn.getresponse()
+            return r.status, _json.loads(r.read())
+        finally:
+            conn.close()
+
+    def post(obj):
+        data = _json.dumps(obj).encode()
+        return raw(str(len(data)), data)
+
+    try:
+        check("non-numeric Content-Length", raw("abc") == (200, BAD))
+        check("negative Content-Length", raw("-5") == (200, BAD))
+        check("invalid JSON gets the fixed text", raw("5", b"{nope") == (200, BAD))
+        for payload in (b"[]", b'"x"', b"5", b"null"):
+            check("non-object JSON %r" % payload, raw(str(len(payload)), payload) == (200, BAD))
+        big = _json.dumps({"action": "draft_event", "params": {"text": "a" * 20000}}).encode()
+        check("body over 16 kB", raw(str(len(big)), big) == (200, BAD))
+        check("params must be an object (list)",
+              post({"action": "draft_event", "params": []}) == (200, BAD))
+        check("params must be an object (string)",
+              post({"action": "draft_event", "params": "x"}) == (200, BAD))
+        check("user_id not a number",
+              post({"action": "draft_event", "params": {"text": "hi"}, "user_id": "abc"}) == (200, BAD))
+        check("user_id is a list",
+              post({"action": "draft_event", "params": {"text": "hi"}, "user_id": [1]}) == (200, BAD))
+        inf = b'{"action": "draft_event", "params": {"text": "hi"}, "user_id": 1e999}'
+        check("user_id is infinity", raw(str(len(inf)), inf) == (200, BAD))
+        check("text param over 4096 chars",
+              post({"action": "draft_event", "params": {"text": "a" * 4097}, "user_id": 111}) == (200, BAD))
+        check("original_message over 4096 chars",
+              post({"action": "draft_event", "params": {"text": "x"}, "user_id": 111,
+                    "original_message": "m" * 4097}) == (200, BAD))
+        check("action name over 64 chars", post({"action": "a" * 65}) == (200, BAD))
+
+        reset()
+        st, body = post({"action": "draft_event", "params": {"text": "a" * 4096}, "user_id": 111})
+        check("4096-char text is the limit, not 4095", body.get("ok") is True, str(body)[:120])
+
+        def boom(params, user_id, original):
+            raise RuntimeError("kaboom-SECRET")
+        saved = service.ACTIONS["draft_event"]
+        service.ACTIONS["draft_event"] = boom
+        try:
+            st, body = post({"action": "draft_event", "params": {"text": "x"}, "user_id": 111})
+        finally:
+            service.ACTIONS["draft_event"] = saved
+        check("internal error reply is the fixed text",
+              body == {"ok": False, "error": "Calendar hit an internal error."}, str(body))
+        check("no exception type or message in the reply",
+              "kaboom" not in str(body) and "RuntimeError" not in str(body))
+
+        with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=5) as r:
+            check("server still healthy after all of that", _json.loads(r.read())["ok"] is True)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def run() -> int:
     print("=" * 70)
     print("Calendar bot — Butler adapter, offline")
@@ -380,6 +460,7 @@ def run() -> int:
         test_typing_opens_the_right_menu,
         test_menu_intent_does_not_hijack_real_edits,
         test_all_day_switch_uses_all_day_alert_choices,
+        test_http_input_validation,
     ]:
         fn()
 
